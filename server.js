@@ -213,6 +213,7 @@ io.on("connection", (socket) => {
   from: socket.id,
   name: user.name,
   message: String(message || "").slice(0, 500)
+ });
 });
 
   socket.on("typing", (name) => {
