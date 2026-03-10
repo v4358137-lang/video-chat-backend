@@ -5,7 +5,11 @@ const { Server } = require("socket.io");
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server);
+const io = new Server(server, {
+  cors: {
+    origin: "*"
+  }
+});
 
 const PORT = process.env.PORT || 3000;
 
@@ -236,17 +240,31 @@ socket.on("typing", () => {
     io.to(user.partnerId).emit("webrtc-answer", { sdp });
   });
 
-  socket.on("webrtc-ice-candidate", ({ candidate }) => {
-    const user = users.get(socket.id);
-    if (!user || !user.partnerId) return;
-    io.to(user.partnerId).emit("webrtc-ice-candidate", { candidate });
-  });
+socket.on("webrtc-ice-candidate", ({ candidate }) => {
 
-  socket.on("disconnect", () => {
-    detachAndNotify(socket.id, "Stranger disconnected");
-    removeFromAllPools(socket.id);
-    users.delete(socket.id);
-  });
+  const user = users.get(socket.id);
+
+  if (!user || !user.partnerId || !candidate) return;
+
+  io.to(user.partnerId).emit("webrtc-ice-candidate", { candidate });
+
+});
+
+socket.on("disconnect", () => {
+
+  const user = users.get(socket.id);
+
+  detachAndNotify(socket.id, "Stranger disconnected");
+
+  removeFromAllPools(socket.id);
+
+  if (user && user.roomId) {
+    rooms.delete(user.roomId);
+  }
+
+  users.delete(socket.id);
+
+});
 });
 
 server.listen(PORT, () => {
