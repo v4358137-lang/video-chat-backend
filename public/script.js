@@ -109,14 +109,31 @@ function buildPeerConnection() {
 
   // Send our local media tracks into WebRTC connection.
   localStream.getTracks().forEach((track) => {
-    peerConnection.addTrack(track, localStream);
+    const sender = peerConnection.addTrack(track, localStream);
+
+if (track.kind === "video") {
+
+  const params = sender.getParameters();
+
+  if (!params.encodings) params.encodings = [{}];
+
+  params.encodings[0].maxBitrate = 2500000;
+
+  sender.setParameters(params);
+
+}
   });
 
   // Receive remote media stream.
-  peerConnection.ontrack = (event) => {
-    const [remoteStream] = event.streams;
-    remoteVideo.srcObject = remoteStream;
-  };
+peerConnection.ontrack = (event) => {
+
+  if (remoteVideo.srcObject !== event.streams[0]) {
+
+    remoteVideo.srcObject = event.streams[0];
+
+  }
+
+};
 
   // Send ICE candidates to partner via signaling server.
   peerConnection.onicecandidate = (event) => {
@@ -124,6 +141,18 @@ function buildPeerConnection() {
       socket.emit("webrtc-ice-candidate", { candidate: event.candidate });
     }
   };
+  peerConnection.onconnectionstatechange = () => {
+
+  console.log("Connection state:", peerConnection.connectionState);
+
+  if (peerConnection.connectionState === "failed") {
+
+    console.log("Restarting ICE");
+
+    peerConnection.restartIce();
+
+  }
+};
 }
 
 async function createOffer() {
