@@ -22,6 +22,7 @@ const reportBtn = document.getElementById("reportBtn");
 const messages = document.getElementById("messages");
 const messageInput = document.getElementById("messageInput");
 const sendBtn = document.getElementById("sendBtn");
+const typingBox = document.getElementById("typing");
 
 let localStream = null;
 let peerConnection = null;
@@ -29,34 +30,39 @@ let isMuted = false;
 let isCameraOff = false;
 let isMatched = false;
 let username = "";
+let currentStrangerName = "Stranger";
+let pendingIceCandidates = [];
+let typingTimeout = null;
 
 const rtcConfig = {
   iceServers: [
     { urls: "stun:stun.l.google.com:19302" },
-
     {
       urls: "turn:openrelay.metered.ca:80",
       username: "openrelayproject",
       credential: "openrelayproject"
     },
-
     {
       urls: "turn:openrelay.metered.ca:443",
       username: "openrelayproject",
       credential: "openrelayproject"
     },
-
     {
       urls: "turn:openrelay.metered.ca:443?transport=tcp",
       username: "openrelayproject",
       credential: "openrelayproject"
     }
   ],
-
   iceCandidatePoolSize: 10,
-
   iceTransportPolicy: "all"
 };
+
+localVideo.autoplay = true;
+localVideo.muted = true;
+localVideo.playsInline = true;
+
+remoteVideo.autoplay = true;
+remoteVideo.playsInline = true;
 
 function addSystemMessage(text) {
   const node = document.createElement("div");
@@ -80,8 +86,31 @@ function setChatEnabled(enabled) {
   reportBtn.disabled = !enabled;
 }
 
+function clearTypingIndicator() {
+  if (typingTimeout) {
+    clearTimeout(typingTimeout);
+    typingTimeout = null;
+  }
+
+  if (typingBox) {
+    typingBox.innerText = "";
+  }
+}
+
+function showTypingIndicator(name) {
+  if (!typingBox) return;
+
+  clearTypingIndicator();
+  typingBox.innerText = `${name || "Stranger"} is typing...`;
+
+  typingTimeout = setTimeout(() => {
+    typingBox.innerText = "";
+  }, 1500);
+}
+
 async function setupLocalMedia() {
-  // Ask for camera + microphone access for HD-capable stream.
+  if (localStream) return localStream;
+
   localStream = await navigator.mediaDevices.getUserMedia({
     video: {
       width: { ideal: 1280 },
@@ -96,67 +125,127 @@ async function setupLocalMedia() {
   });
 
   localVideo.srcObject = localStream;
+
+  try {
+    await localVideo.play();
+  } catch (error) {
+    console.warn("Local video autoplay blocked:", error);
+  }
+
+  return localStream;
 }
 
 function buildPeerConnection() {
   if (peerConnection) {
+    peerConnection.ontrack = null;
+    peerConnection.onicecandidate = null;
+    peerConnection.onconnectionstatechange = null;
     peerConnection.close();
   }
 
-  peerConnection = new RTCPeerConnection({
-  ...rtcConfig,
-  bundlePolicy: "max-bundle",
-  rtcpMuxPolicy: "require"
-});
+  pendingIceCandidates = [];
 
-  // Send our local media tracks into WebRTC connection.
+  peerConnection = new RTCPeerConnection({
+    ...rtcConfig,
+    bundlePolicy: "max-bundle",
+    rtcpMuxPolicy: "require"
+  });
+
+  if (!localStream) {
+    throw new Error("Local stream is not available.");
+  }
+
   localStream.getTracks().forEach((track) => {
     peerConnection.addTrack(track, localStream);
   });
 
-  // Receive remote media stream.
-  peerConnection.ontrack = (event) => {
-
-  if (!remoteVideo.srcObject) {
-    remoteVideo.srcObject = event.streams[0];
-  }
-
-};
+  peerConnection.ontrack = async (event) => {
+    const [stream] = event.streams;
+    if (stream) {
+      remoteVideo.srcObject = stream;
+      try {
+        await remoteVideo.play();
+      } catch (error) {
+        console.warn("Remote video autoplay blocked:", error);
+      }
+    }
+  };
 
   peerConnection.onicecandidate = (event) => {
+    if (!event.candidate) return;
 
-  if (!event.candidate) return;
+    socket.emit("webrtc-ice-candidate", {
+      candidate: event.candidate
+    });
+  };
 
-  socket.emit("webrtc-ice-candidate", {
-    candidate: event.candidate
-  });
+  peerConnection.onconnectionstatechange = () => {
+    const state = peerConnection.connectionState;
 
-};
+    if (state === "connecting") {
+      statusBadge.textContent = "Connecting...";
+    } else if (state === "connected") {
+      statusBadge.textContent = "Connected";
+    } else if (state === "disconnected" || state === "failed") {
+      statusBadge.textContent = "Disconnected";
+    }
+  };
+}
+
+async function flushPendingIceCandidates() {
+  if (!peerConnection || !peerConnection.remoteDescription) return;
+
+  const queue = [...pendingIceCandidates];
+  pendingIceCandidates = [];
+
+  for (const candidate of queue) {
+    try {
+      await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+    } catch (error) {
+      console.error("Failed to add queued ICE candidate", error);
+    }
+  }
 }
 
 async function createOffer() {
   buildPeerConnection();
-  const offer = await peerConnection.createOffer();
+
+  const offer = await peerConnection.createOffer({
+    offerToReceiveAudio: true,
+    offerToReceiveVideo: true
+  });
+
   await peerConnection.setLocalDescription(offer);
-  socket.emit("webrtc-offer", { sdp: offer });
+  socket.emit("webrtc-offer", { sdp: peerConnection.localDescription });
 }
 
 async function handleOffer(sdp) {
   buildPeerConnection();
+
   await peerConnection.setRemoteDescription(new RTCSessionDescription(sdp));
+  await flushPendingIceCandidates();
 
   const answer = await peerConnection.createAnswer();
   await peerConnection.setLocalDescription(answer);
-  socket.emit("webrtc-answer", { sdp: answer });
+
+  socket.emit("webrtc-answer", { sdp: peerConnection.localDescription });
 }
 
 async function handleAnswer(sdp) {
   if (!peerConnection) return;
+
   await peerConnection.setRemoteDescription(new RTCSessionDescription(sdp));
+  await flushPendingIceCandidates();
 }
 
 async function handleIceCandidate(candidate) {
-  if (!peerConnection || !candidate) return;
+  if (!candidate) return;
+
+  if (!peerConnection || !peerConnection.remoteDescription) {
+    pendingIceCandidates.push(candidate);
+    return;
+  }
+
   try {
     await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
   } catch (error) {
@@ -165,13 +254,27 @@ async function handleIceCandidate(candidate) {
 }
 
 function closePeerConnection() {
+  pendingIceCandidates = [];
+
   if (peerConnection) {
     peerConnection.ontrack = null;
     peerConnection.onicecandidate = null;
+    peerConnection.onconnectionstatechange = null;
     peerConnection.close();
     peerConnection = null;
   }
+
   remoteVideo.srcObject = null;
+}
+
+function resetMatchUi(statusText) {
+  statusBadge.textContent = statusText;
+  strangerLabel.textContent = "Stranger";
+  remoteTag.textContent = "Stranger";
+  currentStrangerName = "Stranger";
+  isMatched = false;
+  setChatEnabled(false);
+  clearTypingIndicator();
 }
 
 async function startChatFlow() {
@@ -181,17 +284,17 @@ async function startChatFlow() {
   startBtn.disabled = true;
 
   try {
-    if (!localStream) {
-      await setupLocalMedia();
-    }
+    await setupLocalMedia();
 
     joinScreen.classList.add("hidden");
     chatScreen.classList.remove("hidden");
-    setChatEnabled(false);
 
     messages.innerHTML = "";
-    addSystemMessage("Searching for a random stranger...");
     username = name;
+    closePeerConnection();
+    resetMatchUi("Searching...");
+    addSystemMessage("Searching for a random stranger...");
+
     socket.emit("start-chat", { name, gender });
   } catch (error) {
     alert("Camera/Microphone access is required to start video chat.");
@@ -209,6 +312,7 @@ muteBtn.addEventListener("click", () => {
   localStream.getAudioTracks().forEach((track) => {
     track.enabled = !isMuted;
   });
+
   muteBtn.textContent = isMuted ? "Unmute" : "Mute";
 });
 
@@ -219,17 +323,14 @@ cameraBtn.addEventListener("click", () => {
   localStream.getVideoTracks().forEach((track) => {
     track.enabled = !isCameraOff;
   });
+
   cameraBtn.textContent = isCameraOff ? "Camera On" : "Camera Off";
 });
 
 nextBtn.addEventListener("click", () => {
   addSystemMessage("Moving to next stranger...");
-  statusBadge.textContent = "Finding next...";
-  strangerLabel.textContent = "Stranger";
-  remoteTag.textContent = "Stranger";
-  isMatched = false;
-  setChatEnabled(false);
   closePeerConnection();
+  resetMatchUi("Finding next...");
   socket.emit("next");
 });
 
@@ -237,11 +338,7 @@ endBtn.addEventListener("click", () => {
   socket.emit("end-chat");
 
   closePeerConnection();
-  statusBadge.textContent = "Chat ended";
-  strangerLabel.textContent = "Stranger";
-  isMatched = false;
-  setChatEnabled(false);
-
+  resetMatchUi("Chat ended");
   addSystemMessage("You ended the chat.");
 
   chatScreen.classList.add("hidden");
@@ -252,14 +349,20 @@ endBtn.addEventListener("click", () => {
 reportBtn.addEventListener("click", () => {
   if (!isMatched) return;
 
-  const reason = prompt("Reason for reporting this user:", "Abusive behavior") || "User reported";
+  const reason =
+    prompt("Reason for reporting this user:", "Abusive behavior") || "User reported";
+
   socket.emit("report-user", { reason });
   addSystemMessage("Report submitted.");
 });
 
 sendBtn.addEventListener("click", sendMessage);
+
 messageInput.addEventListener("keydown", (event) => {
-  if (event.key === "Enter") sendMessage();
+  if (event.key === "Enter") {
+    event.preventDefault();
+    sendMessage();
+  }
 });
 
 function sendMessage() {
@@ -267,27 +370,19 @@ function sendMessage() {
   if (!message || !isMatched) return;
 
   socket.emit("chat-message", { message });
-  addChatMessage(message, "self");
+  addChatMessage(`You (${username}): ${message}`, "self");
   messageInput.value = "";
 }
+
 messageInput.addEventListener("input", () => {
-  socket.emit("typing", username);
+  if (!isMatched) return;
+  socket.emit("typing");
 });
-socket.on("typing", (name) => {
 
-  const typingBox = document.getElementById("typing");
-
-  if (typingBox) {
-
-    typingBox.innerText = name + " is typing...";
-
-    setTimeout(() => {
-      typingBox.innerText = "";
-    }, 1500);
-
-  }
-
+socket.on("typing", ({ name }) => {
+  showTypingIndicator(name);
 });
+
 socket.on("waiting", ({ message }) => {
   statusBadge.textContent = "Waiting...";
   strangerLabel.textContent = "Stranger";
@@ -297,19 +392,24 @@ socket.on("waiting", ({ message }) => {
 
 socket.on("matched", async ({ strangerGender, strangerName, shouldInitiateOffer }) => {
   isMatched = true;
+  currentStrangerName = strangerName || "Stranger";
   setChatEnabled(true);
 
   const genderLabel = (strangerGender || "other").replace(/^./, (c) => c.toUpperCase());
+  const label = `${currentStrangerName} (${genderLabel})`;
 
-  statusBadge.textContent = "Connected";
-  strangerLabel.textContent = `Stranger (${genderLabel})`;
-  remoteTag.textContent = `Stranger (${genderLabel})`;
-  addSystemMessage(`Connected with Stranger (${genderLabel})${strangerName ? `: ${strangerName}` : ""}`);
+  statusBadge.textContent = "Connecting...";
+  strangerLabel.textContent = label;
+  remoteTag.textContent = label;
+  addSystemMessage(`Connected with ${label}`);
 
   if (shouldInitiateOffer) {
-    // Delay a bit so both peers complete room setup before signaling.
     setTimeout(() => {
-      if (isMatched) createOffer().catch(console.error);
+      if (isMatched) {
+        createOffer().catch((error) => {
+          console.error("Create offer failed", error);
+        });
+      }
     }, 250);
   }
 });
@@ -334,22 +434,30 @@ socket.on("webrtc-ice-candidate", async ({ candidate }) => {
   await handleIceCandidate(candidate);
 });
 
-socket.on("chat-message", ({ from, message }) => {
+socket.on("chat-message", ({ from, name, message }) => {
   if (!message) return;
-  if (from === socket.id) return; // Ignore echoed own message.
-  addChatMessage(`${name}: ${message}`, "other");
+  if (from === socket.id) return;
+
+  addChatMessage(`${name || currentStrangerName}: ${message}`, "other");
 });
 
 socket.on("partner-left", ({ reason }) => {
-  isMatched = false;
-  setChatEnabled(false);
   closePeerConnection();
-  statusBadge.textContent = "Disconnected";
-  strangerLabel.textContent = "Stranger";
-  remoteTag.textContent = "Stranger";
+  resetMatchUi("Disconnected");
   addSystemMessage(reason || "Stranger left the chat.");
 });
 
 socket.on("chat-ended", ({ message }) => {
   addSystemMessage(message || "Chat ended.");
+});
+
+socket.on("connect", () => {
+  startBtn.disabled = false;
+});
+
+socket.on("disconnect", () => {
+  closePeerConnection();
+  resetMatchUi("Disconnected");
+  addSystemMessage("Disconnected from server.");
+  startBtn.disabled = false;
 });
