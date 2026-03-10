@@ -28,6 +28,7 @@ let peerConnection = null;
 let isMuted = false;
 let isCameraOff = false;
 let isMatched = false;
+let username = "";
 
 const rtcConfig = {
   iceServers: [
@@ -163,7 +164,7 @@ async function startChatFlow() {
 
     messages.innerHTML = "";
     addSystemMessage("Searching for a random stranger...");
-
+    username = name;
     socket.emit("start-chat", { name, gender });
   } catch (error) {
     alert("Camera/Microphone access is required to start video chat.");
@@ -238,11 +239,31 @@ function sendMessage() {
   const message = messageInput.value.trim();
   if (!message || !isMatched) return;
 
-  socket.emit("chat-message", { message });
+  socket.emit("chat-message", { 
+  name: username,
+  message: message
+});
   addChatMessage(`You: ${message}`, "self");
   messageInput.value = "";
 }
+messageInput.addEventListener("input", () => {
+  socket.emit("typing", username);
+});
+socket.on("typing", (name) => {
 
+  const typingBox = document.getElementById("typing");
+
+  if (typingBox) {
+
+    typingBox.innerText = name + " is typing...";
+
+    setTimeout(() => {
+      typingBox.innerText = "";
+    }, 2000);
+
+  }
+
+});
 socket.on("waiting", ({ message }) => {
   statusBadge.textContent = "Waiting...";
   strangerLabel.textContent = "Stranger";
@@ -292,7 +313,7 @@ socket.on("webrtc-ice-candidate", async ({ candidate }) => {
 socket.on("chat-message", ({ from, message }) => {
   if (!message) return;
   if (from === socket.id) return; // Ignore echoed own message.
-  addChatMessage(`Stranger: ${message}`, "other");
+  addChatMessage(`${name}: ${message}`, "other");
 });
 
 socket.on("partner-left", ({ reason }) => {
