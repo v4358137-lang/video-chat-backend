@@ -25,10 +25,12 @@ const sendBtn = document.getElementById("sendBtn");
 
 let localStream = null;
 let peerConnection = null;
+let pendingCandidates = [];
 let isMuted = false;
 let isCameraOff = false;
 let isMatched = false;
 let username = "";
+
 
 const rtcConfig = {
   iceServers: [
@@ -172,17 +174,44 @@ async function handleOffer(sdp) {
 }
 
 async function handleAnswer(sdp) {
+
   if (!peerConnection) return;
+
   await peerConnection.setRemoteDescription(new RTCSessionDescription(sdp));
+
+  // Add queued ICE candidates
+  for (const candidate of pendingCandidates) {
+
+    await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+
+  }
+
+  pendingCandidates = [];
+
 }
 
 async function handleIceCandidate(candidate) {
+
   if (!peerConnection || !candidate) return;
-  try {
-    await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
-  } catch (error) {
-    console.error("Failed to add ICE candidate", error);
+
+  if (peerConnection.remoteDescription) {
+
+    try {
+
+      await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+
+    } catch (error) {
+
+      console.error("ICE candidate error:", error);
+
+    }
+
+  } else {
+
+    pendingCandidates.push(candidate);
+
   }
+
 }
 
 function closePeerConnection() {
@@ -361,7 +390,7 @@ socket.on("webrtc-ice-candidate", async ({ candidate }) => {
 socket.on("chat-message", ({ from, message }) => {
   if (!message) return;
   if (from === socket.id) return; // Ignore echoed own message.
-  addChatMessage(`${name}: ${message}`, "other");
+  addChatMessage(`Stranger: ${message}`, "other");
 });
 
 socket.on("partner-left", ({ reason }) => {
