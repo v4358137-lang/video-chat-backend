@@ -101,10 +101,14 @@ for (const poolName of preferredPools) {
   if (pool.length > 0) {
 
     const randomIndex = Math.floor(Math.random() * pool.length);
-    const candidate = pool.splice(randomIndex, 1)[0];
+    const candidate = pool[randomIndex];
 
     if (candidate && candidate !== socket.id && users.has(candidate)) {
       partnerId = candidate;
+
+      // remove only after valid match
+      pool.splice(randomIndex, 1);
+
       break;
     }
 
