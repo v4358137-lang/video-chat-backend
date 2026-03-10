@@ -267,7 +267,7 @@ function sendMessage() {
   if (!message || !isMatched) return;
 
   socket.emit("chat-message", { message });
-  addChatMessage(message, "self");
+  addChatMessage(`You: ${message}`, "self");
   messageInput.value = "";
 }
 messageInput.addEventListener("input", () => {
@@ -334,7 +334,7 @@ socket.on("webrtc-ice-candidate", async ({ candidate }) => {
   await handleIceCandidate(candidate);
 });
 
-socket.on("chat-message", ({ from, message }) => {
+socket.on("chat-message", ({ from, name, message }) => {
   if (!message) return;
   if (from === socket.id) return; // Ignore echoed own message.
   addChatMessage(`${name}: ${message}`, "other");
