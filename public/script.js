@@ -335,9 +335,12 @@ socket.on("webrtc-ice-candidate", async ({ candidate }) => {
 });
 
 socket.on("chat-message", ({ from, name, message }) => {
+
   if (!message) return;
-  if (from === socket.id) return; // Ignore echoed own message.
+  if (from === socket.id) return;
+
   addChatMessage(`${name}: ${message}`, "other");
+
 });
 
 socket.on("partner-left", ({ reason }) => {
