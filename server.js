@@ -98,20 +98,18 @@ for (const poolName of preferredPools) {
 
   const pool = waitingPools[poolName];
 
-  while (pool.length > 0) {
+  if (pool.length > 0) {
 
     const randomIndex = Math.floor(Math.random() * pool.length);
-    const candidate = pool[randomIndex];
+    const candidate = pool.splice(randomIndex, 1)[0];
 
     if (candidate && candidate !== socket.id && users.has(candidate)) {
       partnerId = candidate;
-      pool.splice(randomIndex, 1);
       break;
     }
 
   }
 
-  if (partnerId) break;
 }
 
   if (!partnerId) {
