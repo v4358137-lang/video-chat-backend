@@ -132,6 +132,7 @@ function buildPeerConnection() {
   });
 
 };
+}
 
 async function createOffer() {
   buildPeerConnection();
