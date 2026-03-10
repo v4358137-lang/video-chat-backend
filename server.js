@@ -5,79 +5,48 @@ const { Server } = require("socket.io");
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, {
-  cors: {
-    origin: "*",
-    methods: ["GET", "POST"]
-  }
-});
+const io = new Server(server);
 
 const PORT = process.env.PORT || 3000;
 
+// Serve static frontend assets.
 app.use(express.static(path.join(__dirname, "public")));
 
-const waitingQueue = [];
-const users = new Map();
-const rooms = new Map();
+// Waiting pools by gender preference.
+const waitingPools = {
+  male: [],
+  female: [],
+  other: []
+};
+
+// Track active rooms and user data.
+const users = new Map(); // socketId -> { name, gender, roomId, partnerId }
+const rooms = new Map(); // roomId -> { a: socketId, b: socketId }
 
 function normalizeGender(input) {
-  const value = String(input || "").trim().toLowerCase();
-  if (value === "male" || value === "female" || value === "other") {
-    return value;
-  }
+  const value = String(input || "").toLowerCase();
+  if (value === "male" || value === "female") return value;
   return "other";
 }
 
-function normalizeName(input) {
-  return String(input || "Anonymous").trim().slice(0, 30) || "Anonymous";
-}
-
-function removeFromWaitingQueue(socketId) {
-  let index = waitingQueue.indexOf(socketId);
-  while (index !== -1) {
-    waitingQueue.splice(index, 1);
-    index = waitingQueue.indexOf(socketId);
+function removeFromAllPools(socketId) {
+  for (const poolName of Object.keys(waitingPools)) {
+    const pool = waitingPools[poolName];
+    const index = pool.indexOf(socketId);
+    if (index !== -1) pool.splice(index, 1);
   }
-}
-
-function getUser(socketId) {
-  return users.get(socketId) || null;
-}
-
-function getSocket(socketId) {
-  return io.sockets.sockets.get(socketId) || null;
 }
 
 function makeRoomId(a, b) {
   return `room_${a}_${b}_${Date.now()}`;
 }
 
-function isSocketAvailableForMatch(socketId) {
-  const user = getUser(socketId);
-  return Boolean(user && !user.roomId);
-}
-
-function emitWaiting(socketId, message = "Looking for a stranger...") {
-  io.to(socketId).emit("waiting", { message });
-}
-
 function joinAsStrangers(socketA, socketB) {
-  const userA = getUser(socketA.id);
-  const userB = getUser(socketB.id);
-
-  if (!userA || !userB) {
-    return false;
-  }
-
-  if (userA.roomId || userB.roomId) {
-    return false;
-  }
-
-  removeFromWaitingQueue(socketA.id);
-  removeFromWaitingQueue(socketB.id);
-
   const roomId = makeRoomId(socketA.id, socketB.id);
-  const aStartsOffer = socketA.id < socketB.id;
+  const userA = users.get(socketA.id);
+  const userB = users.get(socketB.id);
+
+  if (!userA || !userB) return;
 
   userA.roomId = roomId;
   userA.partnerId = socketB.id;
@@ -90,6 +59,10 @@ function joinAsStrangers(socketA, socketB) {
   socketA.join(roomId);
   socketB.join(roomId);
 
+  // Stable initiator selection to avoid offer collisions.
+  const aStartsOffer = socketA.id < socketB.id;
+
+  // Tell both users they are matched and share the stranger's gender.
   io.to(socketA.id).emit("matched", {
     roomId,
     strangerGender: userB.gender,
@@ -103,106 +76,95 @@ function joinAsStrangers(socketA, socketB) {
     strangerName: userA.name,
     shouldInitiateOffer: !aStartsOffer
   });
-
-  return true;
 }
 
 function tryMatch(socket) {
-  const user = getUser(socket.id);
-  if (!user || user.roomId) {
-    return;
-  }
+  const user = users.get(socket.id);
+  if (!user) return;
 
-  removeFromWaitingQueue(socket.id);
+  // Remove stale queue entries first.
+  removeFromAllPools(socket.id);
 
+  const myGender = user.gender;
   let partnerId = null;
 
-  for (const candidateId of waitingQueue) {
-    if (candidateId === socket.id) {
-      continue;
-    }
+  // Simple random matching strategy:
+  // 1) Prefer opposite/broader pool based on sender gender.
+  // 2) Fall back to same pool.
+  // 3) Fall back to any available user.
+  const preferredPools =
+    myGender === "male"
+      ? ["female", "other", "male"]
+      : myGender === "female"
+      ? ["male", "other", "female"]
+      : ["male", "female", "other"];
 
-    if (!isSocketAvailableForMatch(candidateId)) {
-      continue;
+  for (const poolName of preferredPools) {
+    const pool = waitingPools[poolName];
+    if (pool.length > 0) {
+      const randomIndex = Math.floor(Math.random() * pool.length);
+      partnerId = pool.splice(randomIndex, 1)[0];
+      if (partnerId && partnerId !== socket.id && users.has(partnerId)) {
+        break;
+      }
+      partnerId = null;
     }
-
-    partnerId = candidateId;
-    break;
   }
 
   if (!partnerId) {
-    waitingQueue.push(socket.id);
-    emitWaiting(socket.id);
+    // Add me to queue and notify client.
+    waitingPools[myGender].push(socket.id);
+    io.to(socket.id).emit("waiting", { message: "Looking for a stranger..." });
     return;
   }
 
-  removeFromWaitingQueue(partnerId);
-
-  const partnerSocket = getSocket(partnerId);
+  const partnerSocket = io.sockets.sockets.get(partnerId);
   if (!partnerSocket) {
-    tryMatch(socket);
+    tryMatch(socket); // Retry if partner vanished.
     return;
   }
 
-  const matched = joinAsStrangers(socket, partnerSocket);
-  if (!matched) {
-    tryMatch(socket);
-  }
+  joinAsStrangers(socket, partnerSocket);
 }
 
-function leaveRoom(socketId) {
-  const user = getUser(socketId);
-  if (!user || !user.roomId) {
-    return;
-  }
+function detachAndNotify(socketId, reason = "Stranger disconnected") {
+  const user = users.get(socketId);
+  if (!user) return;
 
-  const roomId = user.roomId;
-  rooms.delete(roomId);
+  const { roomId, partnerId } = user;
+
+  removeFromAllPools(socketId);
 
   user.roomId = null;
   user.partnerId = null;
 
-  const socket = getSocket(socketId);
-  if (socket) {
-    socket.leave(roomId);
-  }
-}
+  if (!roomId || !partnerId) return;
 
-function detachAndNotify(socketId, reason = "Stranger disconnected") {
-  const user = getUser(socketId);
-  if (!user) {
-    return;
-  }
+  const room = rooms.get(roomId);
+  if (room) rooms.delete(roomId);
 
-  removeFromWaitingQueue(socketId);
+  const partner = users.get(partnerId);
+  const partnerSocket = io.sockets.sockets.get(partnerId);
 
-  const partnerId = user.partnerId;
-  const roomId = user.roomId;
-
-  leaveRoom(socketId);
-
-  if (!partnerId) {
-    return;
+  if (partner) {
+    partner.roomId = null;
+    partner.partnerId = null;
   }
 
-  const partner = getUser(partnerId);
-  if (partner && partner.roomId === roomId) {
-    leaveRoom(partnerId);
+  if (partnerSocket) {
+    partnerSocket.leave(roomId);
     io.to(partnerId).emit("partner-left", { reason });
-    emitWaiting(partnerId, "Looking for a new stranger...");
   }
 }
 
 io.on("connection", (socket) => {
-  socket.on("start-chat", ({ name, gender } = {}) => {
-    const existingUser = getUser(socket.id);
-    if (existingUser) {
-      detachAndNotify(socket.id, "Stranger left the chat");
-    }
+  socket.on("start-chat", ({ name, gender }) => {
+    const cleanName = String(name || "Stranger").trim().slice(0, 30) || "Stranger";
+    const cleanGender = normalizeGender(gender);
 
     users.set(socket.id, {
-      name: normalizeName(name),
-      gender: normalizeGender(gender),
+      name: cleanName,
+      gender: cleanGender,
       roomId: null,
       partnerId: null
     });
@@ -211,10 +173,8 @@ io.on("connection", (socket) => {
   });
 
   socket.on("next", () => {
-    const user = getUser(socket.id);
-    if (!user) {
-      return;
-    }
+    const user = users.get(socket.id);
+    if (!user) return;
 
     detachAndNotify(socket.id, "Stranger skipped to next chat");
     tryMatch(socket);
@@ -222,93 +182,74 @@ io.on("connection", (socket) => {
 
   socket.on("end-chat", () => {
     detachAndNotify(socket.id, "Stranger ended the chat");
-    removeFromWaitingQueue(socket.id);
+    removeFromAllPools(socket.id);
     users.delete(socket.id);
     io.to(socket.id).emit("chat-ended", { message: "You ended the chat." });
   });
 
-  socket.on("report-user", (payload = {}) => {
-    const reporter = getUser(socket.id);
-    if (!reporter || !reporter.partnerId) {
-      return;
-    }
+  socket.on("report-user", (payload) => {
+    const reporter = users.get(socket.id);
+    if (!reporter || !reporter.partnerId) return;
 
-    const reported = getUser(reporter.partnerId);
+    // For a free self-hosted build we log reports server-side.
+    // You can later store this in DB and add moderation tooling.
+    const reported = users.get(reporter.partnerId);
     console.log("[REPORT]", {
       at: new Date().toISOString(),
       reporterId: socket.id,
       reporterName: reporter.name,
-      reporterGender: reporter.gender,
       reportedId: reporter.partnerId,
       reportedName: reported?.name || "Unknown",
-      reportedGender: reported?.gender || "Unknown",
-      reason: String(payload.reason || "No reason provided").slice(0, 250)
+      reason: payload?.reason || "No reason provided"
     });
   });
 
-  socket.on("chat-message", ({ message } = {}) => {
-    const user = getUser(socket.id);
-    if (!user || !user.partnerId || !user.roomId) {
-      return;
-    }
-
-    const cleanMessage = String(message || "").trim().slice(0, 500);
-    if (!cleanMessage) {
-      return;
-    }
+  // Relay text chat messages to room partner.
+  socket.on("chat-message", ({ message }) => {
+    const user = users.get(socket.id);
+    if (!user || !user.roomId) return;
 
     io.to(user.roomId).emit("chat-message", {
       from: socket.id,
-      name: user.name,
-      message: cleanMessage
+      message: String(message || "").slice(0, 500)
     });
   });
 
-  socket.on("typing", () => {
-    const user = getUser(socket.id);
-    if (!user || !user.partnerId || !user.roomId) {
-      return;
-    }
+  socket.on("typing", (name) => {
 
-    socket.to(user.roomId).emit("typing", {
-      name: user.name
-    });
-  });
+  const user = users.get(socket.id);
+  if (!user || !user.roomId) return;
 
-  socket.on("webrtc-offer", ({ sdp } = {}) => {
-    const user = getUser(socket.id);
-    if (!user || !user.partnerId || !sdp) {
-      return;
-    }
+  socket.to(user.roomId).emit("typing", name);
 
+});
+
+  // Relay WebRTC signaling data.
+  socket.on("webrtc-offer", ({ sdp }) => {
+    const user = users.get(socket.id);
+    if (!user || !user.partnerId) return;
     io.to(user.partnerId).emit("webrtc-offer", { sdp });
   });
 
-  socket.on("webrtc-answer", ({ sdp } = {}) => {
-    const user = getUser(socket.id);
-    if (!user || !user.partnerId || !sdp) {
-      return;
-    }
-
+  socket.on("webrtc-answer", ({ sdp }) => {
+    const user = users.get(socket.id);
+    if (!user || !user.partnerId) return;
     io.to(user.partnerId).emit("webrtc-answer", { sdp });
   });
 
-  socket.on("webrtc-ice-candidate", ({ candidate } = {}) => {
-    const user = getUser(socket.id);
-    if (!user || !user.partnerId || !candidate) {
-      return;
-    }
-
+  socket.on("webrtc-ice-candidate", ({ candidate }) => {
+    const user = users.get(socket.id);
+    if (!user || !user.partnerId) return;
     io.to(user.partnerId).emit("webrtc-ice-candidate", { candidate });
   });
 
   socket.on("disconnect", () => {
     detachAndNotify(socket.id, "Stranger disconnected");
-    removeFromWaitingQueue(socket.id);
+    removeFromAllPools(socket.id);
     users.delete(socket.id);
   });
 });
 
-server.listen(PORT, "0.0.0.0", () => {
-  console.log(`Server is running on http://0.0.0.0:${PORT}`);
+server.listen(PORT, () => {
+  console.log(`Server is running on http://localhost:${PORT}`);
 });
