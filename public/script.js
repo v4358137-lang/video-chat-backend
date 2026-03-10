@@ -53,7 +53,9 @@ const rtcConfig = {
     }
   ],
 
-  iceCandidatePoolSize: 10
+  iceCandidatePoolSize: 10,
+
+  iceTransportPolicy: "all"
 };
 
 function addSystemMessage(text) {
@@ -101,7 +103,11 @@ function buildPeerConnection() {
     peerConnection.close();
   }
 
-  peerConnection = new RTCPeerConnection(rtcConfig);
+  peerConnection = new RTCPeerConnection({
+  ...rtcConfig,
+  bundlePolicy: "max-bundle",
+  rtcpMuxPolicy: "require"
+});
 
   // Send our local media tracks into WebRTC connection.
   localStream.getTracks().forEach((track) => {
@@ -110,17 +116,22 @@ function buildPeerConnection() {
 
   // Receive remote media stream.
   peerConnection.ontrack = (event) => {
-    const [remoteStream] = event.streams;
-    remoteVideo.srcObject = remoteStream;
-  };
 
-  // Send ICE candidates to partner via signaling server.
+  if (!remoteVideo.srcObject) {
+    remoteVideo.srcObject = event.streams[0];
+  }
+
+};
+
   peerConnection.onicecandidate = (event) => {
-    if (event.candidate) {
-      socket.emit("webrtc-ice-candidate", { candidate: event.candidate });
-    }
-  };
-}
+
+  if (!event.candidate) return;
+
+  socket.emit("webrtc-ice-candidate", {
+    candidate: event.candidate
+  });
+
+};
 
 async function createOffer() {
   buildPeerConnection();
@@ -255,14 +266,9 @@ function sendMessage() {
   if (!message || !isMatched) return;
 
   socket.emit("chat-message", { message });
-  addChatMessage(`You: ${message}`, "self");
+  addChatMessage(message, "self");
   messageInput.value = "";
 }
-
-// typing indicator
-messageInput.addEventListener("input", () => {
-  socket.emit("typing", username);
-});
 messageInput.addEventListener("input", () => {
   socket.emit("typing", username);
 });
