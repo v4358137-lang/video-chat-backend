@@ -210,10 +210,10 @@ io.on("connection", (socket) => {
     if (!user || !user.roomId) return;
 
     io.to(user.roomId).emit("chat-message", {
-      from: socket.id,
-      message: String(message || "").slice(0, 500)
-    });
-  });
+  from: socket.id,
+  name: user.name,
+  message: String(message || "").slice(0, 500)
+});
 
   socket.on("typing", (name) => {
 
