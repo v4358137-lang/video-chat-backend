@@ -214,12 +214,13 @@ io.on("connection", (socket) => {
       message: String(message || "").slice(0, 500)
     });
   });
-  socket.on("typing", () => {
+
+  socket.on("typing", (name) => {
 
   const user = users.get(socket.id);
   if (!user || !user.roomId) return;
 
-  socket.to(user.roomId).emit("typing");
+  socket.to(user.roomId).emit("typing", name);
 
 });
 
