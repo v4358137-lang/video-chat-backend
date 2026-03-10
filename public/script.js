@@ -165,12 +165,26 @@ async function createOffer() {
 }
 
 async function handleOffer(sdp) {
+
   buildPeerConnection();
+
   await peerConnection.setRemoteDescription(new RTCSessionDescription(sdp));
 
+  // ADD queued ICE candidates
+  for (const candidate of pendingCandidates) {
+
+    await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+
+  }
+
+  pendingCandidates = [];
+
   const answer = await peerConnection.createAnswer();
+
   await peerConnection.setLocalDescription(answer);
+
   socket.emit("webrtc-answer", { sdp: answer });
+
 }
 
 async function handleAnswer(sdp) {
@@ -215,13 +229,18 @@ async function handleIceCandidate(candidate) {
 }
 
 function closePeerConnection() {
+
+  pendingCandidates = [];
+
   if (peerConnection) {
     peerConnection.ontrack = null;
     peerConnection.onicecandidate = null;
     peerConnection.close();
     peerConnection = null;
   }
+
   remoteVideo.srcObject = null;
+
 }
 
 async function startChatFlow() {
