@@ -94,17 +94,24 @@ function tryMatch(socket) {
   // 3) Fall back to any available user.
 const preferredPools = ["male", "female", "other"];;
 
-  for (const poolName of preferredPools) {
-    const pool = waitingPools[poolName];
-    if (pool.length > 0) {
-      const randomIndex = Math.floor(Math.random() * pool.length);
-      partnerId = pool.splice(randomIndex, 1)[0];
-      if (partnerId && partnerId !== socket.id && users.has(partnerId)) {
-        break;
-      }
-      partnerId = null;
+for (const poolName of preferredPools) {
+
+  const pool = waitingPools[poolName];
+
+  while (pool.length > 0) {
+
+    const randomIndex = Math.floor(Math.random() * pool.length);
+    const candidate = pool.splice(randomIndex, 1)[0];
+
+    if (candidate && candidate !== socket.id && users.has(candidate)) {
+      partnerId = candidate;
+      break;
     }
+
   }
+
+  if (partnerId) break;
+}
 
   if (!partnerId) {
     // Add me to queue and notify client.
