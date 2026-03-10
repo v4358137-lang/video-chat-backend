@@ -92,12 +92,7 @@ function tryMatch(socket) {
   // 1) Prefer opposite/broader pool based on sender gender.
   // 2) Fall back to same pool.
   // 3) Fall back to any available user.
-  const preferredPools =
-    myGender === "male"
-      ? ["female", "other", "male"]
-      : myGender === "female"
-      ? ["male", "other", "female"]
-      : ["male", "female", "other"];
+const preferredPools = ["male", "female", "other"];;
 
   for (const poolName of preferredPools) {
     const pool = waitingPools[poolName];
