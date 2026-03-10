@@ -254,13 +254,15 @@ function sendMessage() {
   const message = messageInput.value.trim();
   if (!message || !isMatched) return;
 
-  socket.emit("chat-message", { 
-  name: username,
-  message: message
-});
+  socket.emit("chat-message", { message });
   addChatMessage(`You: ${message}`, "self");
   messageInput.value = "";
 }
+
+// typing indicator
+messageInput.addEventListener("input", () => {
+  socket.emit("typing", username);
+});
 messageInput.addEventListener("input", () => {
   socket.emit("typing", username);
 });
@@ -274,7 +276,7 @@ socket.on("typing", (name) => {
 
     setTimeout(() => {
       typingBox.innerText = "";
-    }, 2000);
+    }, 1500);
 
   }
 
