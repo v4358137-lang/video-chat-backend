@@ -96,8 +96,6 @@ async function setupLocalMedia() {
   });
 
   localVideo.srcObject = localStream;
-localVideo.muted = true;
-localVideo.play().catch(() => {});
 }
 
 function buildPeerConnection() {
@@ -117,8 +115,12 @@ function buildPeerConnection() {
   });
 
   // Receive remote media stream.
-peerConnection.ontrack = (event) => {
+  peerConnection.ontrack = (event) => {
+
+  if (!remoteVideo.srcObject) {
     remoteVideo.srcObject = event.streams[0];
+  }
+
 };
 
   peerConnection.onicecandidate = (event) => {
