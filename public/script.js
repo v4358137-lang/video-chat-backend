@@ -59,7 +59,7 @@ const rtcConfig = {
 
   ],
 
-  iceCandidatePoolSize: 10
+  iceCandidatePoolSize: 20
 };
 
 function addSystemMessage(text) {
@@ -206,7 +206,7 @@ async function handleAnswer(sdp) {
 
 async function handleIceCandidate(candidate) {
 
-  if (!peerConnection || !candidate) return;
+  if (!candidate) return;
 
   if (peerConnection.remoteDescription) {
 
