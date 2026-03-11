@@ -119,7 +119,7 @@ if (track.kind === "video") {
 
   if (!params.encodings) params.encodings = [{}];
 
-  params.encodings[0].maxBitrate = 2500000;
+  params.encodings[0].maxBitrate = 800000;
 
   sender.setParameters(params);
 
