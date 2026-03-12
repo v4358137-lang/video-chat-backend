@@ -196,7 +196,6 @@ peerConnection.onicecandidate = (event) => {
 
   }
 };
-}
 
 async function createOffer() {
   buildPeerConnection();
