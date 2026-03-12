@@ -91,8 +91,8 @@ async function setupLocalMedia() {
   // Ask for camera + microphone access for HD-capable stream.
   localStream = await navigator.mediaDevices.getUserMedia({
     video: {
-      width: { ideal: 1280 },
-      height: { ideal: 720 },
+      width: { ideal: 640 },
+      height: { ideal: 480 },
       frameRate: { ideal: 20 }
     },
     audio: {
