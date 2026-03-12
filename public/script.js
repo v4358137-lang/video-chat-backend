@@ -126,7 +126,6 @@ function buildPeerConnection() {
 
   peerConnection = new RTCPeerConnection(rtcConfig);
 
-  // Send our local media tracks
   localStream.getTracks().forEach((track) => {
 
     const sender = peerConnection.addTrack(track, localStream);
@@ -148,7 +147,6 @@ function buildPeerConnection() {
 
   });
 
-  // Receive remote media stream
   peerConnection.ontrack = (event) => {
 
     if (remoteVideo.srcObject !== event.streams[0]) {
@@ -157,41 +155,27 @@ function buildPeerConnection() {
 
   };
 
-  // Send ICE candidates
   peerConnection.onicecandidate = (event) => {
 
-    if (!event.candidate) return;
-
-    const candidate = event.candidate;
-
-    if (
-      candidate.candidate.includes("host") ||
-      candidate.candidate.includes("srflx")
-    ) {
-      socket.emit("webrtc-ice-candidate", { candidate });
+    if (event.candidate) {
+      socket.emit("webrtc-ice-candidate", { candidate: event.candidate });
     }
 
-    if (candidate.candidate.includes("relay")) {
-      setTimeout(() => {
-        socket.emit("webrtc-ice-candidate", { candidate });
-      }, 200);
+  };
+
+  // Correct place
+  peerConnection.onconnectionstatechange = () => {
+
+    console.log("Connection state:", peerConnection.connectionState);
+
+    if (peerConnection.connectionState === "failed") {
+      console.log("Restarting ICE");
+      peerConnection.restartIce();
     }
 
   };
 
 }
-  peerConnection.onconnectionstatechange = () => {
-
-  console.log("Connection state:", peerConnection.connectionState);
-
-  if (peerConnection.connectionState === "failed") {
-
-    console.log("Restarting ICE");
-
-    peerConnection.restartIce();
-
-  }
-};
 
 async function createOffer() {
   buildPeerConnection();
