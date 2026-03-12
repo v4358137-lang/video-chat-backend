@@ -103,6 +103,7 @@ async function setupLocalMedia() {
   });
 
   localVideo.srcObject = localStream;
+  await localVideo.play();
 }
 
 function buildPeerConnection() {
