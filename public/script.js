@@ -141,11 +141,28 @@ peerConnection.ontrack = (event) => {
 };
 
   // Send ICE candidates to partner via signaling server.
-  peerConnection.onicecandidate = (event) => {
-    if (event.candidate) {
-      socket.emit("webrtc-ice-candidate", { candidate: event.candidate });
-    }
-  };
+peerConnection.onicecandidate = (event) => {
+
+  if (!event.candidate) return;
+
+  const candidate = event.candidate;
+
+  // Direct connection candidates first
+  if (
+    candidate.candidate.includes("host") ||
+    candidate.candidate.includes("srflx")
+  ) {
+    socket.emit("webrtc-ice-candidate", { candidate });
+  }
+
+  // TURN relay only if needed
+  if (candidate.candidate.includes("relay")) {
+    setTimeout(() => {
+      socket.emit("webrtc-ice-candidate", { candidate });
+    }, 200);
+  }
+
+};
   peerConnection.onconnectionstatechange = () => {
 
   console.log("Connection state:", peerConnection.connectionState);
