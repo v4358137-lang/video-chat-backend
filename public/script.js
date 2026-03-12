@@ -402,7 +402,7 @@ socket.on("matched", async ({ strangerGender, strangerName, shouldInitiateOffer 
     // Delay a bit so both peers complete room setup before signaling.
     setTimeout(() => {
       if (isMatched) createOffer().catch(console.error);
-    }, 250);
+    }, 100);
   }
 });
 
