@@ -59,7 +59,10 @@ const rtcConfig = {
 
   ],
 
-  iceCandidatePoolSize: 20
+  bundlePolicy: "max-bundle",
+  rtcpMuxPolicy: "require",
+  iceTransportPolicy: "all",
+  iceCandidatePoolSize: 30
 };
 
 function addSystemMessage(text) {
