@@ -88,22 +88,31 @@ function setChatEnabled(enabled) {
 }
 
 async function setupLocalMedia() {
-  // Ask for camera + microphone access for HD-capable stream.
-  localStream = await navigator.mediaDevices.getUserMedia({
-    video: {
-      width: { ideal: 640 },
-      height: { ideal: 480 },
-      frameRate: { ideal: 20 }
-    },
-    audio: {
-      echoCancellation: true,
-      noiseSuppression: true,
-      autoGainControl: true
-    }
-  });
 
-  localVideo.srcObject = localStream;
-  await localVideo.play();
+  try {
+
+    localStream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        width: { ideal: 640 },
+        height: { ideal: 480 },
+        frameRate: { ideal: 20 }
+      },
+      audio: true
+    });
+
+    localVideo.srcObject = localStream;
+
+    localVideo.muted = true;   // important
+    localVideo.playsInline = true;
+
+    await localVideo.play();
+
+  } catch (err) {
+
+    console.error("Camera error:", err);
+
+  }
+
 }
 
 function buildPeerConnection() {
