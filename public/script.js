@@ -91,18 +91,21 @@ async function setupLocalMedia() {
 
   try {
 
-    localStream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        width: { ideal: 640 },
-        height: { ideal: 480 },
-        frameRate: { ideal: 20 }
-      },
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: true,
       audio: true
     });
 
-    localVideo.srcObject = localStream;
+    localStream = stream;
 
-    localVideo.muted = true;   // important
+    const videoTrack = stream.getVideoTracks()[0];
+
+    const newStream = new MediaStream([videoTrack]);
+
+    localVideo.srcObject = newStream;
+
+    localVideo.muted = true;
+    localVideo.autoplay = true;
     localVideo.playsInline = true;
 
     await localVideo.play();
