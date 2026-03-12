@@ -122,12 +122,14 @@ if (track.kind === "video") {
 
   if (!params.encodings) params.encodings = [{}];
 
-  params.encodings[0].maxBitrate = 800000;
+  params.encodings[0].maxBitrate = 700000;   // bandwidth control
+  params.encodings[0].maxFramerate = 20;     // smooth frames
+
+  params.degradationPreference = "maintain-framerate";
 
   sender.setParameters(params);
 
 }
-  });
 
   // Receive remote media stream.
 peerConnection.ontrack = (event) => {
