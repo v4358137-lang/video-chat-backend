@@ -115,6 +115,7 @@ function buildPeerConnection() {
   // Send our local media tracks into WebRTC connection.
   localStream.getTracks().forEach((track) => {
     const sender = peerConnection.addTrack(track, localStream);
+    });
 
 if (track.kind === "video") {
 
