@@ -119,42 +119,47 @@ async function setupLocalMedia() {
 }
 
 function buildPeerConnection() {
+
   if (peerConnection) {
     peerConnection.close();
   }
 
   peerConnection = new RTCPeerConnection(rtcConfig);
 
-  // Send our local media tracks into WebRTC connection.
+  // Send our local media tracks
   localStream.getTracks().forEach((track) => {
+
     const sender = peerConnection.addTrack(track, localStream);
-    });
 
-if (track.kind === "video") {
+    if (track.kind === "video") {
 
-  const params = sender.getParameters();
+      const params = sender.getParameters();
 
-  if (!params.encodings) params.encodings = [{}];
+      if (!params.encodings) params.encodings = [{}];
 
-  params.encodings[0].maxBitrate = 700000;   // bandwidth control
-  params.encodings[0].maxFramerate = 20;     // smooth frames
+      params.encodings[0].maxBitrate = 700000;
+      params.encodings[0].maxFramerate = 20;
 
-  params.degradationPreference = "maintain-framerate";
+      params.degradationPreference = "maintain-framerate";
 
-  sender.setParameters(params);
+      sender.setParameters(params);
+
+    }
+
+  });
+
+  // Receive remote media stream
+  peerConnection.ontrack = (event) => {
+
+    if (remoteVideo.srcObject !== event.streams[0]) {
+
+      remoteVideo.srcObject = event.streams[0];
+
+    }
+
+  };
 
 }
-
-  // Receive remote media stream.
-peerConnection.ontrack = (event) => {
-
-  if (remoteVideo.srcObject !== event.streams[0]) {
-
-    remoteVideo.srcObject = event.streams[0];
-
-  }
-
-};
 
   // Send ICE candidates to partner via signaling server.
 peerConnection.onicecandidate = (event) => {
